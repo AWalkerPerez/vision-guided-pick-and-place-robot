@@ -78,7 +78,7 @@ or update the path inside `aruco_pose.py`.
 ---
 
 ## How to run (typical order)
-| In separate terminals, always source ROS 2 first.
+In separate terminals, always source ROS 2 first.
 
 ### Terminal 1 — Camera publisher
 ```bash
