@@ -1,1 +1,41 @@
+# --- ROS2 / colcon ---
+build/
+install/
+log/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Data / outputs ---
+*.bag
+*.bag.active
+*.csv
+*.npz
+*.npy
+*.pkl
+
+# --- Media exports (keep if you WANT them tracked; otherwise ignore) ---
+# *.mp4
+# *.mov
+# *.avi
+
+# --- CAD exports (same note as above) ---
+# *.stl
+# *.3mf
 
