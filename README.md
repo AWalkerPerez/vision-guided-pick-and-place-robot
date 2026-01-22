@@ -15,9 +15,6 @@ ROS2-based autonomous pick-and-place with AprilTag detection and Jacobian-based 
 - Media (photos/videos) documenting the setup and results
 - Final report PDF
 
-## Repo structure
-
-
 ## Quickstart (hardware required)
 **1.** Install ROS2 (Iron recommended)
 
