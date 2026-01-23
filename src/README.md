@@ -2,129 +2,146 @@
 
 Core ROS 2 (Python) scripts for the **vision-guided 3DOF pick-and-place robot**.
 
-This project is **hardware-first**:
-- USB camera (top-down)
-- Physical 3DOF arm with Dynamixels (via OpenRB-150)
-- Printed ArUco/AprilTag markers
-- End-effector / gripper hardware
-
+This project is **hardware-first** (camera + Dynamixel/OpenRB-150 + physical robot).  
 There is no simulation workflow provided.
 
 ---
 
-## Files in this folder
+## Files
 
 ### ROS 2 nodes
 - `camera_publisher.py`  
-  Publishes camera frames as ROS 2 images.
-  - **Publishes:** `camera/image` (`sensor_msgs/Image`)
+  Publishes camera frames.
+  - Publishes: `camera/image` (`sensor_msgs/Image`)
 
 - `aruco_pose.py`  
-  Subscribes to camera images, detects markers, and publishes marker position per ID.
-  - **Subscribes:** `camera/image`
-  - **Publishes:** `desired_pos_<id>` (`std_msgs/Float32MultiArray`)  
-    Example: `desired_pos_7` for marker id 7.
-
-  > **Important:** this script loads camera intrinsics from `calibration.npz` using a relative path:
-  > `np.load('calibration.npz')`  
-  > So you must run it from a directory where `calibration.npz` exists (or edit the path in the script).
-
-- `control_dls.py`  
-  Damped Least Squares (DLS) IK controller: converts target Cartesian position into joint commands.
-  - **Subscribes:** `joint_state`
-  - **Publishes:** `joint_pos`, `cartesian_pos`
+  Detects ArUco markers in `camera/image`, computes each marker pose **relative to marker ID 0**, and publishes a topic per marker ID.
+  - Subscribes: `camera/image`
+  - Publishes: `desired_pos_<id>` (`std_msgs/Float32MultiArray`) e.g. `desired_pos_7`
+  - Parameter: `marker_size` (default **0.025 m** = 25 mm)
 
 - `marker_tracking.py`  
-  High-level pick-and-place logic/state machine. Sends joint targets and gripper commands.
-  - **Subscribes:** `joint_state`
-  - **Publishes:** `joint_pos`, `cartesian_pos`, `gripper_command`
+  High-level **pick-and-place state machine**.
+  - Subscribes: `joint_state` and dynamically subscribes to `desired_pos_<id>` topics
+  - Publishes: `joint_pos`, `cartesian_pos`, `gripper_command`
+  - Two stages:
+    - **Stage 1 (recording):** records desired goal positions from **even marker IDs**
+    - **Stage 2 (moving):** tracks objects from **odd marker IDs**
+  - Pairing rule used in code:
+    - Object marker `X` (odd) uses goal marker `(X + 1)` (even)
+
+- `control_dls.py`  
+  Damped Least Squares (DLS) IK controller: Cartesian target → joint targets.
+  - Subscribes: `joint_state`
+  - Publishes: `joint_pos`, `cartesian_pos`
 
 - `hardware_interface.py`  
-  Hardware node for the Dynamixel/OpenRB-150 system. Publishes joint feedback and listens for command topics.
-  - **Publishes:** `/joint_state`, `/cartesian_pos`, `/ee_min_max`, `/emergency_stop`
-  - **Subscribes:** `/joint_pos`, `/joint_vel`, `/joint_cur`, `/joint_pos_rel`, `/gripper_command`
-
-  > This node is the “bridge” to the physical robot. Without hardware connected, this script will not function end-to-end.
+  Hardware bridge for Dynamixels via OpenRB-150.
+  - Publishes: `/joint_state`, `/cartesian_pos`, `/ee_min_max`, `/emergency_stop`
+  - Subscribes: `/joint_pos`, `/joint_vel`, `/joint_cur`, `/joint_pos_rel`, `/gripper_command`
 
 ### Utility (not a ROS node)
 - `cameraCalibration.py`  
-  Offline chessboard camera calibration utility. Produces `calibration.npz`.
+  Chessboard calibration utility. Saves intrinsics to `calibration.npz`.
 
 ---
 
-## Prerequisites
+## Marker pose message format (important)
 
-- ROS 2 installed and sourced (these scripts use `rclpy`)
-- OpenCV + `cv_bridge`
-- Python packages: `numpy`, `opencv-python` (or system OpenCV)
-- Dynamixel/OpenRB dependencies as required by `hardware_interface.py`
+`aruco_pose.py` publishes a `Float32MultiArray` with 6 values:
 
-If you hit OpenCV/cv_bridge import issues, prefer **system packages** that match your ROS install
-(avoid mixing pip OpenCV with apt-installed cv_bridge unless you know the ABI matches).
+`[x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg]`
+
+In the current implementation, the first two values are published as:
+
+- `msg.data[0] = relative_y_mm`
+- `msg.data[1] = relative_x_mm`
+
+`marker_tracking.py` then uses only the first two values:
+
+- `pos = [msg.data[0], msg.data[1]]`
+- `yaw = msg.data[5]`
+
+So the system is internally consistent, but note the **X/Y ordering** is “swapped” compared to some comments.
 
 ---
 
-## Calibration (required before marker detection)
+## Calibration (required)
 
-Run the calibration utility and generate `calibration.npz`:
+`aruco_pose.py` loads calibration like this:
 
+```python
+np.load("calibration.npz")
+```
+So the simplest workflow is to generate the file in the repo root and run nodes from the repo root.
+
+Generate calibration:
 ```bash
 python3 src/cameraCalibration.py
 ```
-
-Then ensure `calibration.npz` is available from the working directory when running `aruco_pose.py`,
-or update the path inside `aruco_pose.py`.
+This creates:
+`calibration.npz` (in your current working directory)
 
 ---
 
-## How to run (typical order)
-In separate terminals, always source ROS 2 first.
+## Running the system (typical order)
+Open separate terminals and ensure ROS 2 is sourced in each.
 
-### Terminal 1 — Camera publisher
+### 1) Camera publisher
 ```bash
 python3 src/camera_publisher.py
 ```
-### Terminal 2 — Marker detection
+### 2) Marker detection
 ```bash
 python3 src/aruco_pose.py
 ```
-### Terminal 3 — Hardware interface (robot must be connected)
+### 3) Hardware interface (robot must be connected)
 ```bash
 python3 src/hardware_interface.py
 ```
-### Terminal 4 — Control / pick-and-place logic
-Depending on how you ran experiments, you may run one or both:
+### 4) Autonomy / control
+You typically run the pick-and-place state machine (and optionally DLS control depending on your test):
 ```bash
-python3 src/control_dls.py
 python3 src/marker_tracking.py
 ```
+Optional (if you use the DLS node separately):
+```bash
+python3 src/control_dls.py
+```
 
-----
+---
 
-## Notes on topics and naming
-- Some scripts publish topics without a leading `/` (e.g. `joint_pos`)
-- Some scripts subscribe/publish with a leading `/` (e.g. `/joint_pos`)
-
-ROS 2 treats these as different names in some contexts depending on node namespaces.
-If you see “no messages received”, check topic names with:
+## Debugging quick commands
+List topics:
 ```bash
 ros2 topic list
-ros2 topic echo /joint_state
 ```
-If needed, standardise topic names (either always with `/` or always without) across scripts.
+Echo key topics:
+```bash
+ros2 topic echo /joint_state
+ros2 topic echo desired_pos_0
+ros2 topic echo desired_pos_1
+```
 
 ---
 
 ## Common issues
-**- No marker detections**
-  - Confirm marker size in code matches your printed markers (25mm / 50mm)
-  - Confirm `calibration.npz` is being loaded (correct working directory)
-  - Improve lighting / focus
-**- Robot moves unpredictably**
-  - Increase damping in DLS (in `control_dls.py`)
-  - Verify coordinate frame assumptions (camera frame vs robot base frame)
-  - Verify link lengths / kinematic model constants
+**- No markers detected**
+
+    - Check lighting / focus
+    
+    - Confirm printed marker size matches marker_size (25mm default)
+    
+    - Confirm calibration.npz exists where you run aruco_pose.py
+    
+    - Robot moves wrong direction / mirrored
+    
+    - Double-check the X/Y ordering (see message format section)
+    
+    - Verify camera mounting orientation and coordinate assumptions
+
 **- Motors not responding**
-  - Check serial port permissions and correct device name
-  - Confirm motor IDs and baud rate in `hardware_interface.py`
-  - Confirm torque enable logic is active
+
+    - Check device connection/permissions/port configuration inside hardware_interface.py
+    
+    - Confirm motor IDs and baud rate match your hardware setup
